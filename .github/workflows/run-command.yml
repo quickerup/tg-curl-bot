@@ -6,7 +6,7 @@ jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - name: Run command safely and report back to Telegram
+      - name: Run command and report back to Telegram
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CMD_B64: ${{ github.event.client_payload.command_b64 }}
@@ -17,19 +17,11 @@ jobs:
             echo "Error: Missing command payload or Chat ID."
             exit 1
           fi
-
-          CMD=$(echo "$CMD_B64" | base64 -d)
-          echo "Executing command..."
-
-          OUTPUT=$(timeout 60s bash -c "$CMD" 2>&1)
+          CMD="$(printf '%s' "$CMD_B64" | base64 -d)"
+          OUTPUT="$(timeout 60s bash -c "$CMD" 2>&1)"
           STATUS=$?
+          TRUNCATED="$(echo "$OUTPUT" | tail -n 50)"
+          MSG="$(printf 'Exit code: %s
 
-          # Truncate output
-          TRUNCATED=$(echo "$OUTPUT" | tail -n 50)
-
-          # Build message safely
-          MSG=$(printf "Exit code: %s\n\n%s" "$STATUS" "$TRUNCATED")
-
-          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-            --data-urlencode "chat_id=${CHAT_ID}" \
-            --data-urlencode "text=${MSG}"
+%s' "$STATUS" "$TRUNCATED")"
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"             --data-urlencode "chat_id=${CHAT_ID}"             --data-urlencode "text=${MSG}"

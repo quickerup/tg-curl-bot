@@ -6,33 +6,44 @@ jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - name: Run command and report back
+      - name: Run command and report back to Telegram
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          # Support both possible payload keys for compatibility
-          PAYLOAD_B64: ${{ github.event.client_payload.command_b64 || github.event.client_payload.command }}
+          CMD_B64: ${{ github.event.client_payload.command_b64 }}
           CHAT_ID: ${{ github.event.client_payload.chat_id }}
         run: |
           set +e
-          if [ -z "$PAYLOAD_B64" ] || [ -z "$CHAT_ID" ]; then
-            echo "❌ Error: Missing payload ($PAYLOAD_B64) or Chat ID ($CHAT_ID)"
+          echo "🔍 Secret Check: TELEGRAM_BOT_TOKEN present: $([ -n "$TELEGRAM_BOT_TOKEN" ] && echo yes || echo NO)"
+          echo "👤 Target Chat ID: $CHAT_ID"
+
+          if [ -z "$CMD_B64" ] || [ -z "$CHAT_ID" ]; then
+            echo "::error::Missing command payload or Chat ID."
             exit 1
           fi
 
-          # Decode command
-          CMD=$(echo "$PAYLOAD_B64" | base64 -d)
+          CMD="$(printf '%s' "$CMD_B64" | base64 -d)"
           echo "🚀 Executing: $CMD"
 
-          # Run command with a timeout
-          OUTPUT=$(timeout 60s bash -c "$CMD" 2>&1)
+          OUTPUT="$(timeout 60s bash -c "$CMD" 2>&1)"
           STATUS=$?
+          
+          TRUNCATED="$(echo "$OUTPUT" | tail -c 3000)"
+          MSG="💻 *Command:* \`$CMD\`\n✅ *Exit Code:* $STATUS\n\n\`\`\`\n$TRUNCATED\n\`\`\`"
 
-          # Prepare and truncate message (Telegram limit is 4096, we take last 3000 chars)
-          TRUNCATED=$(echo "$OUTPUT" | tail -c 3000)
-          MSG=$(printf "💻 *Command:* \`$CMD\`\n✅ *Exit Code:* $STATUS\n\n\`\`\`\n%s\n\`\`\`" "$TRUNCATED")
-
-          # Send back to Telegram
-          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          echo "==> Sending result to Telegram API..."
+          # Capture full response and status code
+          FULL_RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -d "chat_id=${CHAT_ID}" \
             -d "parse_mode=Markdown" \
-            --data-urlencode "text=${MSG}"
+            --data-urlencode "text=${MSG}")
+
+          echo "==> API Response Body:"
+          echo "$FULL_RESPONSE" | grep -v "HTTP_STATUS"
+
+          HTTP_STATUS=$(echo "$FULL_RESPONSE" | grep -o 'HTTP_STATUS:[0-9]*' | cut -d: -f2)
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "::error::Telegram API failed with HTTP $HTTP_STATUS"
+            exit 1
+          fi
+          echo "✅ Successfully delivered to Telegram."

@@ -26,8 +26,8 @@ jobs:
 
           # Truncate output for Telegram
           TRUNCATED="$(echo "$OUTPUT" | tail -n 50)"
-          
-          # Use a heredoc or simple string for MSG to avoid YAML escaping issues
+
+          # Create message string safely for shell
           MSG="Exit code: ${STATUS}
 
 ${TRUNCATED}"

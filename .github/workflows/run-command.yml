@@ -18,17 +18,18 @@ jobs:
             exit 1
           fi
 
-          CMD="$(printf '%s' "$CMD_B64" | base64 -d)"
+          CMD=$(echo "$CMD_B64" | base64 -d)
           echo "Executing command..."
 
-          OUTPUT="$(timeout 60s bash -c "$CMD" 2>&1)"
+          OUTPUT=$(timeout 60s bash -c "$CMD" 2>&1)
           STATUS=$?
 
-          # Truncate output for Telegram
-          TRUNCATED="$(echo "$OUTPUT" | tail -n 50)"
+          # Truncate output
+          TRUNCATED=$(echo "$OUTPUT" | tail -n 50)
 
-          # Create message string safely for shell
-          MSG="Exit code: ${STATUS}
-          ${TRUNCATED}"
+          # Build message safely
+          MSG=$(printf "Exit code: %s\n\n%s" "$STATUS" "$TRUNCATED")
 
-          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"             --data-urlencode "chat_id=${CHAT_ID}"             --data-urlencode "text=${MSG}"
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${CHAT_ID}" \
+            --data-urlencode "text=${MSG}"

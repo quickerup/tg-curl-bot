@@ -1,0 +1,46 @@
+name: run-remote-command
+
+on:
+  repository_dispatch:
+    types: [run-command]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: run-remote-command
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Run command safely and report back to Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ github.event.client_payload.chat_id }}
+          CMD_B64: ${{ github.event.client_payload.command_b64 }}
+        run: |
+          set +e
+          # Command arrives base64-encoded to avoid any shell-injection via YAML interpolation.
+          CMD="$(echo "$CMD_B64" | base64 -d)"
+          echo "Running (sanitized log): [redacted length ${#CMD}]"
+
+          OUTPUT="$(timeout 60s bash -c "$CMD" 2>&1)"
+          STATUS=$?
+
+          # Truncate to fit Telegram's 4096 char message limit.
+          TRUNCATED="$(echo "$OUTPUT" | tail -c 3800)"
+          MSG="Exit code: ${STATUS}
+${TRUNCATED}"
+
+          for attempt in 1 2 3; do
+            HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+              "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              --data-urlencode "chat_id=${CHAT_ID}" \
+              --data-urlencode "text=${MSG}")
+            [ "$HTTP_CODE" = "200" ] && break
+            echo "sendMessage attempt $attempt failed (HTTP $HTTP_CODE), retrying..."
+            sleep 2
+          done

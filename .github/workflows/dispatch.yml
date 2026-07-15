@@ -23,40 +23,24 @@ jobs:
           CMD_B64: ${{ github.event.client_payload.command_b64 }}
         run: |
           set +e
-
-          # 1. Validate inputs
-          if [ -z "$CMD_B64" ] || [ -z "$CHAT_ID" ]; then
-            echo "Error: Missing command payload or Chat ID."
-            exit 1
-          fi
-
-          # 2. Decode safely without losing newlines/interpreting backslashes
-          CMD="$(printf '%s' "$CMD_B64" | base64 -d)"
-          export CMD
+          # Command arrives base64-encoded to avoid any shell-injection via YAML interpolation.
+          CMD="$(echo "$CMD_B64" | base64 -d)"
           echo "Running (sanitized log): [redacted length ${#CMD}]"
 
-          # 3. Execute safely using single-quoted env variable to prevent quote expansion bugs
-          OUTPUT="$(timeout 60s bash -c '$CMD' 2>&1)"
+          OUTPUT="$(timeout 60s bash -c "$CMD" 2>&1)"
           STATUS=$?
 
-          # 4. Safely truncate using lines instead of raw bytes to protect UTF-8 compliance
-          TRUNCATED="$(echo "$OUTPUT" | tail -n 50)"
+          # Truncate to fit Telegram's 4096 char message limit.
+          TRUNCATED="$(echo "$OUTPUT" | tail -c 3800)"
           MSG="Exit code: ${STATUS}
-          
-          ${TRUNCATED}"
+${TRUNCATED}"
 
-          # 5. Send to Telegram with retries
           for attempt in 1 2 3; do
             HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
               "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
               --data-urlencode "chat_id=${CHAT_ID}" \
               --data-urlencode "text=${MSG}")
-            
-            if [ "$HTTP_CODE" = "200" ]; then
-              echo "Telegram notification sent successfully."
-              break
-            fi
-            
+            [ "$HTTP_CODE" = "200" ] && break
             echo "sendMessage attempt $attempt failed (HTTP $HTTP_CODE), retrying..."
             sleep 2
           done

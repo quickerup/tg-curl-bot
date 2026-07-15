@@ -29,7 +29,6 @@ jobs:
 
           # Create message string safely for shell
           MSG="Exit code: ${STATUS}
-
-${TRUNCATED}"
+          ${TRUNCATED}"
 
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"             --data-urlencode "chat_id=${CHAT_ID}"             --data-urlencode "text=${MSG}"

@@ -1,4 +1,4 @@
-name = "tg-curl-bott"
+name = "tg-curl-bot"
 main = "src/index.js"
 compatibility_date = "2024-01-01"
 

@@ -1,4 +1,3 @@
-
 name: Run remote command
 on:
   repository_dispatch:
@@ -10,7 +9,6 @@ jobs:
       - name: Run command safely and report back to Telegram
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          # Correctly mapping from client_payload
           CMD_B64: ${{ github.event.client_payload.command_b64 }}
           CHAT_ID: ${{ github.event.client_payload.chat_id }}
         run: |
@@ -22,12 +20,14 @@ jobs:
 
           CMD="$(printf '%s' "$CMD_B64" | base64 -d)"
           echo "Executing command..."
-          
+
           OUTPUT="$(timeout 60s bash -c "$CMD" 2>&1)"
           STATUS=$?
-          
+
           # Truncate output for Telegram
           TRUNCATED="$(echo "$OUTPUT" | tail -n 50)"
+          
+          # Use a heredoc or simple string for MSG to avoid YAML escaping issues
           MSG="Exit code: ${STATUS}
 
 ${TRUNCATED}"

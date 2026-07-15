@@ -6,22 +6,33 @@ jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - name: Run command and report back to Telegram
+      - name: Run command and report back
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          CMD_B64: ${{ github.event.client_payload.command_b64 }}
+          # Support both possible payload keys for compatibility
+          PAYLOAD_B64: ${{ github.event.client_payload.command_b64 || github.event.client_payload.command }}
           CHAT_ID: ${{ github.event.client_payload.chat_id }}
         run: |
           set +e
-          if [ -z "$CMD_B64" ] || [ -z "$CHAT_ID" ]; then
-            echo "Error: Missing command payload or Chat ID."
+          if [ -z "$PAYLOAD_B64" ] || [ -z "$CHAT_ID" ]; then
+            echo "❌ Error: Missing payload ($PAYLOAD_B64) or Chat ID ($CHAT_ID)"
             exit 1
           fi
-          CMD="$(printf '%s' "$CMD_B64" | base64 -d)"
-          OUTPUT="$(timeout 60s bash -c "$CMD" 2>&1)"
-          STATUS=$?
-          TRUNCATED="$(echo "$OUTPUT" | tail -n 50)"
-          MSG="$(printf 'Exit code: %s
 
-%s' "$STATUS" "$TRUNCATED")"
-          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"             --data-urlencode "chat_id=${CHAT_ID}"             --data-urlencode "text=${MSG}"
+          # Decode command
+          CMD=$(echo "$PAYLOAD_B64" | base64 -d)
+          echo "🚀 Executing: $CMD"
+
+          # Run command with a timeout
+          OUTPUT=$(timeout 60s bash -c "$CMD" 2>&1)
+          STATUS=$?
+
+          # Prepare and truncate message (Telegram limit is 4096, we take last 3000 chars)
+          TRUNCATED=$(echo "$OUTPUT" | tail -c 3000)
+          MSG=$(printf "💻 *Command:* \`$CMD\`\n✅ *Exit Code:* $STATUS\n\n\`\`\`\n%s\n\`\`\`" "$TRUNCATED")
+
+          # Send back to Telegram
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${CHAT_ID}" \
+            -d "parse_mode=Markdown" \
+            --data-urlencode "text=${MSG}"

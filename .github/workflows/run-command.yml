@@ -1,33 +1,58 @@
 name: Run remote command
+
 on:
   repository_dispatch:
     types: [run-command]
+
 jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - name: Run command and report back to Telegram (Run ID ${{ github.run_id }})
+      - name: Run command and report back to Telegram
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CMD_B64: ${{ github.event.client_payload.command_b64 }}
           CHAT_ID: ${{ github.event.client_payload.chat_id }}
         run: |
           set +e
+
           if [ -z "$CMD_B64" ] || [ -z "$CHAT_ID" ]; then
-            echo "Error [Run ID ${{ github.run_id }}]: Missing command payload or Chat ID."
+            echo "Error: Missing command payload or Chat ID."
             exit 1
           fi
 
           CMD="$(printf '%s' "$CMD_B64" | base64 -d)"
-          export CMD
-          echo "Running (sanitized log) [Run ID ${{ github.run_id }}]: [redacted length ${#CMD}]"
+          OUTPUT="$(timeout 60s bash -c "$CMD" 2>&1)"
+          STATUS=$?
+          TRUNCATED="$(echo "$OUTPUT" | tail -n 50)"
 
-          # Use 'eval "$CMD"' with single-quoted CMD env variable to preserve literal quotes
-          OUTPUT="$(timeout 60s bash -c 'eval "$CMD"' 2>&1)"
-          
-          # Truncate to fit Telegram limits (approx 4000 chars)
-          TRUNCATED="$(echo "$OUTPUT" | tail -c 4000)"
+          html_escape() {
+            sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+          }
 
-          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          CMD_ESC="$(printf '%s' "$CMD" | html_escape)"
+          OUT_ESC="$(printf '%s' "$TRUNCATED" | html_escape)"
+
+          if [ "$STATUS" -eq 0 ]; then ICON="✅"; else ICON="❌"; fi
+
+          MSG="${ICON} <b>Command</b>
+<pre>${CMD_ESC}</pre>
+<b>Exit code:</b> ${STATUS}
+
+<b>Output</b>
+<pre>${OUT_ESC}</pre>"
+
+          echo "==> Calling Telegram sendMessage..."
+          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${CHAT_ID}" \
-            --data-urlencode "text=${TRUNCATED}"
+            --data-urlencode "parse_mode=HTML" \
+            --data-urlencode "text=${MSG}")
+
+          echo "$RESPONSE"
+
+          HTTP_STATUS=$(echo "$RESPONSE" | grep -o 'HTTP_STATUS:[0-9]*' | cut -d: -f2)
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "::error::Telegram sendMessage failed with HTTP $HTTP_STATUS"
+            exit 1
+          fi

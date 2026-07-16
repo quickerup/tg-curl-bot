@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Run command safely and report back to Telegram
+      - name: Run command safely and report back to Telegram (Run ID ${{ github.run_id }})
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ github.event.client_payload.chat_id }}
@@ -26,17 +26,18 @@ jobs:
 
           # 1. Validate inputs
           if [ -z "$CMD_B64" ] || [ -z "$CHAT_ID" ]; then
-            echo "Error: Missing command payload or Chat ID."
+            echo "Error [Run ID ${{ github.run_id }}]: Missing command payload or Chat ID."
             exit 1
           fi
 
           # 2. Decode safely without losing newlines/interpreting backslashes
           CMD="$(printf '%s' "$CMD_B64" | base64 -d)"
           export CMD
-          echo "Running (sanitized log): [redacted length ${#CMD}]"
+          echo "Running (sanitized log) [Run ID ${{ github.run_id }}]: [redacted length ${#CMD}]"
 
           # 3. Execute safely using single-quoted env variable to prevent quote expansion bugs
-          OUTPUT="$(timeout 60s bash -c '$CMD' 2>&1)"
+          # Running 'eval' on the env variable preserves the literal quotes exactly
+          OUTPUT="$(timeout 60s bash -c 'eval "$CMD"' 2>&1)"
           STATUS=$?
 
           # 4. Safely truncate using lines instead of raw bytes to protect UTF-8 compliance
@@ -53,10 +54,10 @@ jobs:
               --data-urlencode "text=${MSG}")
             
             if [ "$HTTP_CODE" = "200" ]; then
-              echo "Telegram notification sent successfully."
+              echo "Telegram notification sent successfully for Run ID ${{ github.run_id }}."
               break
             fi
             
-            echo "sendMessage attempt $attempt failed (HTTP $HTTP_CODE), retrying..."
+            echo "sendMessage attempt $attempt failed for Run ID ${{ github.run_id }} (HTTP $HTTP_CODE), retrying..."
             sleep 2
           done

@@ -2,7 +2,7 @@
 // a GitHub Actions workflow run (anything needing real shell/curl).
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     if (request.method !== "POST") return new Response("ok");
 
     // Reject anything that isn't actually from Telegram. Telegram sets this
@@ -35,50 +35,58 @@ export default {
     const text = msg.text.trim();
 
     if (text === "/help" || text === "/start") {
-      await sendMessage(env, chatId,
-        "Send 'GET <url>' for a direct fetch, or any other text to run as a shell command via GitHub Actions."
-      );
+      ctx.waitUntil((async () => {
+        await sendMessage(env, chatId,
+          "Send 'GET <url>' for a direct fetch, or any other text to run as a shell command via GitHub Actions."
+        );
+      })());
       return new Response("ok");
     }
-
-    // Ack fast so Telegram doesn't retry.
-    await sendMessage(env, chatId, "Working on it…");
 
     // Very simple routing: "GET <url>" handled directly by the Worker.
     // Anything else goes to GitHub Actions to run as a real shell command.
     const simpleGet = text.match(/^GET\s+(\S+)/i);
     if (simpleGet) {
-      try {
-        const res = await fetch(simpleGet[1]);
-        const body = (await res.text()).slice(0, 3500);
-        await sendMessage(env, chatId, `Status: ${res.status}\n${body}`);
-      } catch (e) {
-        await sendMessage(env, chatId, `Fetch failed: ${e.message}`);
-      }
+      ctx.waitUntil((async () => {
+        // Ack fast so Telegram doesn't retry.
+        await sendMessage(env, chatId, "Working on it…");
+        try {
+          const res = await fetch(simpleGet[1]);
+          const body = (await res.text()).slice(0, 3500);
+          await sendMessage(env, chatId, `Status: ${res.status}\n${body}`);
+        } catch (e) {
+          await sendMessage(env, chatId, `Fetch failed: ${e.message}`);
+        }
+      })());
       return new Response("ok");
     }
 
     // Otherwise: dispatch to GitHub Actions.
-    const commandB64 = btoa(unescape(encodeURIComponent(text)));
-    const ghRes = await fetch(
-      `https://api.github.com/repos/${env.GH_OWNER}/${env.GH_REPO}/dispatches`,
-      {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${env.GH_PAT}`,
-          "Accept": "application/vnd.github+json",
-          "User-Agent": "tg-curl-bot-worker",
-        },
-        body: JSON.stringify({
-          event_type: "run-command",
-          client_payload: { command_b64: commandB64, chat_id: chatId },
-        }),
-      }
-    );
+    ctx.waitUntil((async () => {
+      // Ack fast so Telegram doesn't retry.
+      await sendMessage(env, chatId, "Working on it…");
 
-    if (!ghRes.ok) {
-      await sendMessage(env, chatId, `Failed to dispatch job (${ghRes.status}).`);
-    }
+      const commandB64 = btoa(unescape(encodeURIComponent(text)));
+      const ghRes = await fetch(
+        `https://api.github.com/repos/${env.GH_OWNER}/${env.GH_REPO}/dispatches`,
+        {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${env.GH_PAT}`,
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "tg-curl-bot-worker",
+          },
+          body: JSON.stringify({
+            event_type: "run-command",
+            client_payload: { command_b64: commandB64, chat_id: chatId },
+          }),
+        }
+      );
+
+      if (!ghRes.ok) {
+        await sendMessage(env, chatId, `Failed to dispatch job (${ghRes.status}).`);
+      }
+    })());
 
     return new Response("ok");
   },

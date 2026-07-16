@@ -6,7 +6,7 @@ jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - name: Run command and report back to Telegram
+      - name: Run command and report back to Telegram (Run ID ${{ github.run_id }})
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CMD_B64: ${{ github.event.client_payload.command_b64 }}
@@ -14,11 +14,16 @@ jobs:
         run: |
           set +e
           if [ -z "$CMD_B64" ] || [ -z "$CHAT_ID" ]; then
+            echo "Error [Run ID ${{ github.run_id }}]: Missing command payload or Chat ID."
             exit 1
           fi
 
           CMD="$(printf '%s' "$CMD_B64" | base64 -d)"
-          OUTPUT="$(timeout 60s bash -c "$CMD" 2>&1)"
+          export CMD
+          echo "Running (sanitized log) [Run ID ${{ github.run_id }}]: [redacted length ${#CMD}]"
+
+          # Use 'eval "$CMD"' with single-quoted CMD env variable to preserve literal quotes
+          OUTPUT="$(timeout 60s bash -c 'eval "$CMD"' 2>&1)"
           
           # Truncate to fit Telegram limits (approx 4000 chars)
           TRUNCATED="$(echo "$OUTPUT" | tail -c 4000)"
